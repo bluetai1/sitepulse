@@ -27,3 +27,7 @@ timestamp,url,status_code,is_up,response_ms
 2026-10-23 04:21:53,https://www.github.com,200,True,1088
 2026-10-23 04:21:53,https://www.wikipedia.org,200,True,626
 2026-10-23 04:21:53,https://this-site-does-not-exist-sitepulse-test.com,,False,30
+2026-10-23 14:27:01,https://www.google.com,,False,12
+2026-10-23 14:27:01,https://www.github.com,,False,2
+2026-10-23 14:27:01,https://www.wikipedia.org,,False,2
+2026-10-23 14:27:01,https://this-site-does-not-exist-sitepulse-test.com,,False,1
