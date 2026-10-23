@@ -4,6 +4,14 @@
 # If a site can't be reached, it is marked DOWN with a short reason and the
 # program moves on to the next site instead of crashing.
 # Every run's results are also added to history.csv so you can look back later.
+#
+# Usage:
+#   py sitepulse.py            check every site in sites.json now
+#   py sitepulse.py --report   show uptime % and average response time from history.csv
+
+# "argparse" is built into Python. It reads options typed after the script
+# name, like --report, and creates a --help message for free.
+import argparse
 
 # "csv" is built into Python. It reads and writes spreadsheet-style CSV files.
 import csv
@@ -197,8 +205,8 @@ def format_row(status, code, time_ms, url, note, url_width):
     return line.rstrip()
 
 
-def main():
-    """The starting point of the program."""
+def run_checks():
+    """Check every site in sites.json, print a table, and save to history.csv."""
     sites = load_sites(SITES_FILE)
 
     if not sites:
@@ -257,6 +265,121 @@ def main():
     print(f"\n{up_count} of {len(sites)} sites are up.")
 
     save_history(history_rows)
+
+
+def show_report():
+    """Read history.csv and print each site's uptime % and average response time.
+
+    This doesn't visit any websites; it only looks at past results.
+    """
+    try:
+        # encoding="utf-8-sig" also copes with the hidden marker Excel adds
+        # to the start of a CSV file if you save it from Excel.
+        with open(HISTORY_FILE, newline="", encoding="utf-8-sig") as file:
+            # DictReader uses the header row, so each row becomes a dictionary
+            # like {"url": "https://www.google.com", "is_up": "True", ...}
+            # list() reads every row now, so the file can be closed straight away.
+            rows = list(csv.DictReader(file))
+
+    except FileNotFoundError:
+        sys.exit(f"No {HISTORY_FILE} yet. Run 'py sitepulse.py' first to record some checks.")
+
+    # OSError: the file can't be opened (e.g. no permission).
+    # UnicodeDecodeError: the file isn't readable text.
+    except (OSError, UnicodeDecodeError) as error:
+        sys.exit(f"Error: could not read {HISTORY_FILE} ({error}).")
+
+    # Add up the results for each site. "stats" is a dictionary where each
+    # key is a URL and each value is that site's running totals.
+    # Dictionaries remember the order keys were added, so sites appear in
+    # the order they were first checked.
+    stats = {}
+
+    # Count rows we couldn't understand (e.g. edited by hand by mistake).
+    skipped = 0
+
+    for row in rows:
+        try:
+            url = row["url"]
+            # lower() means "True", "TRUE" and "true" all work.
+            # Excel changes True to TRUE if you save the file from Excel.
+            is_up = row["is_up"].strip().lower() == "true"
+            response_ms = int(row["response_ms"])
+            # An empty status_code means the site never answered.
+            answered = row["status_code"].strip() != ""
+
+        # KeyError: a column is missing. AttributeError: the row is too short
+        # (the missing value is None). ValueError: response_ms isn't a number.
+        except (KeyError, AttributeError, ValueError):
+            skipped += 1
+            continue
+
+        # The first time we see a URL, start its totals at zero.
+        if url not in stats:
+            stats[url] = {"checks": 0, "up": 0, "answered": 0, "total_ms": 0}
+
+        site = stats[url]
+        site["checks"] += 1
+        if is_up:
+            site["up"] += 1
+
+        # Only count response time when the site actually answered.
+        # Failed checks would skew the average: a fake domain fails in
+        # about 30 ms, while a timeout always takes 5000 ms.
+        if answered:
+            site["answered"] += 1
+            site["total_ms"] += response_ms
+
+    if not stats:
+        print(f"{HISTORY_FILE} has no results yet. Run 'py sitepulse.py' first.")
+        return
+
+    # Show the time range the report covers. Rows are added in time order,
+    # so the first row is the oldest and the last row is the newest.
+    # .get() gives "?" instead of crashing if the timestamp column is missing.
+    first = rows[0].get("timestamp", "?")
+    last = rows[-1].get("timestamp", "?")
+    print(f"Report from {HISTORY_FILE} ({first} to {last})\n")
+
+    # The URL comes last so the number columns can stay a fixed width.
+    print(f"{'UPTIME':>7}  {'CHECKS':>6}  {'AVG (ms)':>8}  URL")
+    print(f"{'-' * 7}  {'-' * 6}  {'-' * 8}  {'-' * 3}")
+
+    for url, site in stats.items():
+        # Uptime % = how many checks were UP, out of all checks, times 100.
+        uptime = site["up"] / site["checks"] * 100
+        # :.1f shows one decimal place, e.g. 66.7
+        uptime_text = f"{uptime:.1f}%"
+
+        # If the site never answered, there's no average to show.
+        if site["answered"] == 0:
+            average_text = "-"
+        else:
+            average_text = str(round(site["total_ms"] / site["answered"]))
+
+        print(f"{uptime_text:>7}  {site['checks']:>6}  {average_text:>8}  {url}")
+
+    if skipped:
+        print(f"\nSkipped {skipped} row(s) in {HISTORY_FILE} that couldn't be read.")
+
+
+def main():
+    """The starting point of the program: decide which mode to run."""
+    # Describe the options this program accepts. argparse uses this to
+    # read what was typed, and to print help for "py sitepulse.py --help".
+    parser = argparse.ArgumentParser(description="Check whether websites are up.")
+    parser.add_argument(
+        "--report",
+        # store_true means: if --report is typed, args.report is True, otherwise False.
+        action="store_true",
+        help=f"show uptime and average response time from {HISTORY_FILE} instead of running checks",
+    )
+    args = parser.parse_args()
+
+    if args.report:
+        show_report()
+    else:
+        run_checks()
 
 
 # This line means "only run main() when this file is run directly"
