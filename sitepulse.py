@@ -33,6 +33,12 @@ import requests
 # Keeping it in a variable means we only have to change it in one place.
 SITES_FILE = "sites.json"
 
+# The file where results from every run are saved.
+HISTORY_FILE = "history.csv"
+
+# The column names for history.csv, in order.
+HISTORY_COLUMNS = ["timestamp", "url", "status_code", "is_up", "response_ms"]
+
 # How many seconds to wait for a site before giving up on it.
 TIMEOUT_SECONDS = 5
 
@@ -78,12 +84,17 @@ def load_sites(filename):
 
 
 def check_site(url):
-    """Visit one URL and return (status, detail, milliseconds).
+    """Visit one URL and return (status, status_code, reason, milliseconds).
 
     status is "UP" or "DOWN".
-    detail is the status code (e.g. "200") if the site answered,
-    or a short reason (e.g. "timed out") if it didn't.
+    status_code is the number the site sent back (e.g. 200), or None if it never answered.
+    reason is a short explanation (e.g. "timed out") if it never answered, otherwise None.
     """
+    # Start by assuming there's no status code and no problem.
+    # The code below fills these in.
+    status_code = None
+    reason = None
+
     # perf_counter() is a very precise stopwatch. We note the time before
     # the request so we can work out how long it took afterwards.
     start = time.perf_counter()
@@ -108,11 +119,11 @@ def check_site(url):
             status = "UP"
         else:
             status = "DOWN"
-        detail = str(response.status_code)
+        status_code = response.status_code
 
     # The site took longer than TIMEOUT_SECONDS to respond.
     except requests.exceptions.Timeout:
-        status, detail = "DOWN", f"timed out after {TIMEOUT_SECONDS}s"
+        status, reason = "DOWN", f"timed out after {TIMEOUT_SECONDS}s"
 
     # The URL itself is broken: missing "https://", a typo like "htps://",
     # or not a web address at all.
@@ -121,31 +132,69 @@ def check_site(url):
         requests.exceptions.InvalidSchema,
         requests.exceptions.InvalidURL,
     ):
-        status, detail = "DOWN", "invalid URL"
+        status, reason = "DOWN", "invalid URL"
 
     # The site's security certificate is broken or expired.
     except requests.exceptions.SSLError:
-        status, detail = "DOWN", "SSL certificate error"
+        status, reason = "DOWN", "SSL certificate error"
 
     # We couldn't connect at all: the domain doesn't exist, the server
     # refused us, or there is no internet connection.
     except requests.exceptions.ConnectionError:
-        status, detail = "DOWN", "could not connect (site not found or no internet)"
+        status, reason = "DOWN", "could not connect (site not found or no internet)"
 
     # Any other requests problem (e.g. too many redirects).
     except requests.exceptions.RequestException:
-        status, detail = "DOWN", "request failed"
+        status, reason = "DOWN", "request failed"
 
     # A safety net for anything we didn't expect, so one bad site
     # can never stop the whole program.
     except Exception as error:
-        status, detail = "DOWN", f"unexpected error ({type(error).__name__})"
+        status, reason = "DOWN", f"unexpected error ({type(error).__name__})"
 
     # Stop the stopwatch. The difference is in seconds, so * 1000 gives
     # milliseconds, and round() removes the decimal places.
     milliseconds = round((time.perf_counter() - start) * 1000)
 
-    return status, detail, milliseconds
+    return status, status_code, reason, milliseconds
+
+
+def save_history(rows):
+    """Add this run's results to the end of history.csv.
+
+    rows is a list of lists, one per site, in the same order as HISTORY_COLUMNS.
+    """
+    # If the file doesn't exist yet (or is empty), we need to write the
+    # header row first. os.path.getsize gives the file size in bytes.
+    is_new_file = not os.path.exists(HISTORY_FILE) or os.path.getsize(HISTORY_FILE) == 0
+
+    try:
+        # "a" means append: add to the end of the file instead of replacing it.
+        # newline="" stops Windows from adding blank lines between rows.
+        with open(HISTORY_FILE, "a", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+            if is_new_file:
+                writer.writerow(HISTORY_COLUMNS)
+            writer.writerows(rows)
+
+    # OSError covers problems saving the file, such as history.csv being
+    # open in Excel (which locks it on Windows). The checks already ran,
+    # so just warn instead of crashing.
+    except OSError as error:
+        print(f"\nWarning: could not save results to {HISTORY_FILE} ({error.strerror}).")
+        print("If the file is open in Excel, close it and run SitePulse again.")
+
+
+def format_row(status, code, time_ms, url, note, url_width):
+    """Turn one row of the results table into a neatly lined-up line of text.
+
+    :<n pads text on the right to n characters (left-aligned).
+    :>n pads text on the left to n characters (right-aligned, good for numbers).
+    """
+    line = f"{status:<6}  {code:>4}  {time_ms:>9}  {url:<{url_width}}  {note}"
+
+    # rstrip() removes spaces left at the end of the line when there's no note.
+    return line.rstrip()
 
 
 def main():
@@ -159,13 +208,55 @@ def main():
     # len() tells us how many items are in the list.
     print(f"Checking {len(sites)} sites from {SITES_FILE}...\n")
 
-    # Loop through the list, one URL at a time.
-    for url in sites:
-        status, detail, milliseconds = check_site(url)
+    # One timestamp for the whole run, so all rows from this run share it
+    # and are easy to group together. Example: 2026-10-23 14:05:00
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # :<4 pads the text to 4 characters wide so the columns line up.
-        # :>5 lines the numbers up on the right.
-        print(f"{status:<4}  {milliseconds:>5} ms  {url}  ({detail})")
+    # Collect a row for each site here, then save them all at the end.
+    history_rows = []
+
+    # Count how many sites are up, for the summary line at the end.
+    up_count = 0
+
+    # The URL column must be as wide as the longest URL so the NOTE column
+    # lines up. str() handles anything in sites.json that isn't text.
+    # max() picks the biggest number. The second line makes sure the column
+    # is never narrower than its own title, "URL".
+    url_width = max(len(str(url)) for url in sites)
+    url_width = max(url_width, len("URL"))
+
+    # Print the table header, then a line of dashes under each column title.
+    print(format_row("STATUS", "CODE", "TIME (ms)", "URL", "NOTE", url_width))
+    print(format_row("-" * 6, "-" * 4, "-" * 9, "-" * url_width, "-" * 4, url_width))
+
+    # Loop through the list, one URL at a time. Each row prints as soon as
+    # its site is checked, so you can watch the progress.
+    for url in sites:
+        status, status_code, reason, milliseconds = check_site(url)
+
+        if status == "UP":
+            up_count += 1
+
+        # If the site never answered, show "-" instead of a code.
+        if status_code is None:
+            code_text = "-"
+        else:
+            code_text = str(status_code)
+
+        # reason is None when there was no problem; show nothing in that case.
+        note = reason or ""
+
+        print(format_row(status, code_text, milliseconds, str(url), note, url_width))
+
+        # If the site never answered, leave status_code blank in the CSV.
+        if status_code is None:
+            status_code = ""
+        history_rows.append([timestamp, url, status_code, status == "UP", milliseconds])
+
+    # The summary line, e.g. "3 of 4 sites are up."
+    print(f"\n{up_count} of {len(sites)} sites are up.")
+
+    save_history(history_rows)
 
 
 # This line means "only run main() when this file is run directly"
