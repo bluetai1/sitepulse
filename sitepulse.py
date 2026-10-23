@@ -53,7 +53,7 @@ def check_site(url):
     try:
         # Send a GET request (the same kind a browser sends when you open a page).
         # timeout stops us waiting forever if the site doesn't respond.
-        response = requests.get(url, timeout=TIMEOUT_SECONDS)
+        response = requests.get(url, headers=HEADERS, timeout=TIMEOUT_SECONDS)
 
         # Status codes below 400 mean success (200 = OK, 301/302 = redirect).
         # 400 and above mean an error (404 = not found, 500 = server error).
