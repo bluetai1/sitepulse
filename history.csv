@@ -19,3 +19,11 @@ timestamp,url,status_code,is_up,response_ms
 2026-10-23 04:18:58,https://www.github.com,200,True,1130
 2026-10-23 04:18:58,https://www.wikipedia.org,200,True,547
 2026-10-23 04:18:58,https://this-site-does-not-exist-sitepulse-test.com,,False,33
+2026-10-23 04:20:58,https://www.google.com,200,True,642
+2026-10-23 04:20:58,https://www.github.com,200,True,1291
+2026-10-23 04:20:58,https://www.wikipedia.org,200,True,641
+2026-10-23 04:20:58,https://this-site-does-not-exist-sitepulse-test.com,,False,32
+2026-10-23 04:21:53,https://www.google.com,200,True,558
+2026-10-23 04:21:53,https://www.github.com,200,True,1088
+2026-10-23 04:21:53,https://www.wikipedia.org,200,True,626
+2026-10-23 04:21:53,https://this-site-does-not-exist-sitepulse-test.com,,False,30

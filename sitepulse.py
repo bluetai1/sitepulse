@@ -267,30 +267,25 @@ def run_checks():
     save_history(history_rows)
 
 
-def show_report():
-    """Read history.csv and print each site's uptime % and average response time.
+def calculate_uptime(up, checks):
+    """Return the percentage of checks that were UP, e.g. 3 out of 4 -> 75.0.
 
-    This doesn't visit any websites; it only looks at past results.
+    Returns 0.0 if there were no checks, instead of dividing by zero.
     """
-    try:
-        # encoding="utf-8-sig" also copes with the hidden marker Excel adds
-        # to the start of a CSV file if you save it from Excel.
-        with open(HISTORY_FILE, newline="", encoding="utf-8-sig") as file:
-            # DictReader uses the header row, so each row becomes a dictionary
-            # like {"url": "https://www.google.com", "is_up": "True", ...}
-            # list() reads every row now, so the file can be closed straight away.
-            rows = list(csv.DictReader(file))
+    if checks == 0:
+        return 0.0
+    return up / checks * 100
 
-    except FileNotFoundError:
-        sys.exit(f"No {HISTORY_FILE} yet. Run 'py sitepulse.py' first to record some checks.")
 
-    # OSError: the file can't be opened (e.g. no permission).
-    # UnicodeDecodeError: the file isn't readable text.
-    except (OSError, UnicodeDecodeError) as error:
-        sys.exit(f"Error: could not read {HISTORY_FILE} ({error}).")
+def summarize_history(rows):
+    """Add up the results for each site from a list of history.csv rows.
 
-    # Add up the results for each site. "stats" is a dictionary where each
-    # key is a URL and each value is that site's running totals.
+    rows is a list of dictionaries, like the ones csv.DictReader gives.
+    Returns (stats, skipped):
+      stats is a dictionary where each key is a URL and each value is that
+      site's totals: {"checks": ..., "up": ..., "answered": ..., "total_ms": ...}
+      skipped is how many rows couldn't be understood.
+    """
     # Dictionaries remember the order keys were added, so sites appear in
     # the order they were first checked.
     stats = {}
@@ -330,6 +325,34 @@ def show_report():
             site["answered"] += 1
             site["total_ms"] += response_ms
 
+    return stats, skipped
+
+
+def show_report():
+    """Read history.csv and print each site's uptime % and average response time.
+
+    This doesn't visit any websites; it only looks at past results.
+    """
+    try:
+        # encoding="utf-8-sig" also copes with the hidden marker Excel adds
+        # to the start of a CSV file if you save it from Excel.
+        with open(HISTORY_FILE, newline="", encoding="utf-8-sig") as file:
+            # DictReader uses the header row, so each row becomes a dictionary
+            # like {"url": "https://www.google.com", "is_up": "True", ...}
+            # list() reads every row now, so the file can be closed straight away.
+            rows = list(csv.DictReader(file))
+
+    except FileNotFoundError:
+        sys.exit(f"No {HISTORY_FILE} yet. Run 'py sitepulse.py' first to record some checks.")
+
+    # OSError: the file can't be opened (e.g. no permission).
+    # UnicodeDecodeError: the file isn't readable text.
+    except (OSError, UnicodeDecodeError) as error:
+        sys.exit(f"Error: could not read {HISTORY_FILE} ({error}).")
+
+    # Add up the results for each site.
+    stats, skipped = summarize_history(rows)
+
     if not stats:
         print(f"{HISTORY_FILE} has no results yet. Run 'py sitepulse.py' first.")
         return
@@ -346,8 +369,7 @@ def show_report():
     print(f"{'-' * 7}  {'-' * 6}  {'-' * 8}  {'-' * 3}")
 
     for url, site in stats.items():
-        # Uptime % = how many checks were UP, out of all checks, times 100.
-        uptime = site["up"] / site["checks"] * 100
+        uptime = calculate_uptime(site["up"], site["checks"])
         # :.1f shows one decimal place, e.g. 66.7
         uptime_text = f"{uptime:.1f}%"
 
