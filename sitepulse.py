@@ -3,6 +3,13 @@
 # whether it is UP or DOWN, its status code, and how long it took to respond.
 # If a site can't be reached, it is marked DOWN with a short reason and the
 # program moves on to the next site instead of crashing.
+# Every run's results are also added to history.csv so you can look back later.
+
+# "csv" is built into Python. It reads and writes spreadsheet-style CSV files.
+import csv
+
+# "os" is built into Python. We use it to check whether history.csv exists yet.
+import os
 
 # "json" is built into Python. It turns JSON text into Python data
 # (JSON lists become Python lists, JSON objects become dictionaries).
@@ -14,6 +21,9 @@ import sys
 
 # "time" is built into Python. We use it to measure how long each request takes.
 import time
+
+# "datetime" is built into Python. We use it to stamp each run with the date and time.
+from datetime import datetime
 
 # "requests" is the outside library from requirements.txt.
 # It lets Python visit web pages, like a browser does.
