@@ -1,0 +1,8 @@
+{
+  "sites": [
+    "https://www.google.com",
+    "https://www.github.com",
+    "https://www.wikipedia.org",
+    "https://this-site-does-not-exist-sitepulse-test.com"
+  ]
+}
